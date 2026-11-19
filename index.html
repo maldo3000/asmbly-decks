@@ -177,6 +177,7 @@
     els[i].querySelectorAll('video').forEach(v => {
       v.muted = muted || !!deck.slides[i].mute;
       if (prev !== i) v.currentTime = 0;
+      if (!started) { v.pause(); return; }      // hold the first frame behind the start screen
       const p = v.play();
       if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
     });
@@ -203,7 +204,8 @@
     started = true;
     start.classList.remove('show');
     enterFs();
-    show(Math.max(cur, 0));
+    const i = Math.max(cur, 0); cur = -1;       // re-enter so its video starts from 0
+    show(i);
   }
 
   // ---------- blank / hud ----------
