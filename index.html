@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASMBLY Decks</title>
+<style>
+  :root { --bg:#000; --fg:#f4f4f4; --dim:#8a8a8a; --line:#2a2a2a; --pop:#DC3EB2; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; background:var(--bg); color:var(--fg);
+    font-family:Inter, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  body { overflow:hidden; }
+
+  /* ---------- picker ---------- */
+  #picker { position:fixed; inset:0; overflow:auto; padding:56px 48px; }
+  #picker h1 { font-size:14px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:32px; }
+  #picker .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:32px; }
+  #picker a { color:inherit; text-decoration:none; display:block; }
+  #picker a img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:#111; border:1px solid var(--line); }
+  #picker a:hover img, #picker a:focus img { border-color:var(--fg); }
+  #picker .t { font-size:22px; font-weight:600; margin-top:14px; letter-spacing:-.01em; }
+  #picker .s { font-size:14px; color:var(--dim); margin-top:4px; }
+  #picker .keys { margin-top:56px; color:var(--dim); font-size:13px; line-height:1.8; max-width:720px; }
+  #picker kbd { font-family:Menlo, monospace; font-size:12px; border:1px solid var(--line); padding:1px 6px; color:var(--fg); }
+
+  /* ---------- stage ---------- */
+  #stage { position:fixed; inset:0; display:none; background:#000; cursor:none; }
+  #stage.show { display:block; }
+  #stage.cursor { cursor:default; }
+  .slide { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; }
+  .slide.on { opacity:1; }
+  .slide.fade { transition:opacity .35s ease; }
+  .slide img, .slide video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  #blank { position:fixed; inset:0; background:#000; display:none; z-index:20; }
+  #blank.white { background:#fff; }
+  #hud { position:fixed; right:16px; bottom:12px; z-index:30; font:12px Menlo, monospace; color:#fff;
+    background:rgba(0,0,0,.55); padding:4px 8px; display:none; }
+  #start { position:fixed; inset:0; z-index:40; display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:14px; background:rgba(0,0,0,.72); cursor:pointer; text-align:center; }
+  #start.show { display:flex; }
+  #start b { font-size:28px; font-weight:600; letter-spacing:-.01em; }
+  #start span { font-size:14px; color:#bbb; }
+  #jump { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:35; display:none;
+    font:600 64px Menlo, monospace; color:#fff; background:rgba(0,0,0,.7); padding:12px 28px; }
+
+  /* ---------- overview ---------- */
+  #overview { position:fixed; inset:0; z-index:50; background:#0b0b0b; overflow:auto; padding:32px; display:none; cursor:default; }
+  #overview.show { display:block; }
+  #overview .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+  #overview button { all:unset; cursor:pointer; position:relative; display:block; }
+  #overview img { width:100%; aspect-ratio:16/9; object-fit:contain; background:#000; display:block; border:2px solid transparent; }
+  #overview button.cur img { border-color:var(--pop); }
+  #overview button:focus-visible img { border-color:#fff; }
+  #overview i { position:absolute; left:6px; top:4px; font:600 12px Menlo, monospace; font-style:normal; color:#fff; text-shadow:0 0 4px #000; }
+  #overview .vid { left:auto; right:6px; }
+</style>
+</head>
+<body>
+
+<div id="picker">
+  <h1>ASMBLY · Nov 19 · Talks</h1>
+  <div class="grid" id="deckList"></div>
+  <div class="keys">
+    Clicker: next / back flip slides; the play button (F5 / Esc) toggles fullscreen; the screen button (B / .) blacks out.<br>
+    Keyboard: <kbd>→</kbd> <kbd>Space</kbd> <kbd>PgDn</kbd> next · <kbd>←</kbd> <kbd>PgUp</kbd> back ·
+    <kbd>F</kbd> fullscreen · <kbd>B</kbd> black · <kbd>W</kbd> white · <kbd>G</kbd> overview ·
+    <kbd>Home</kbd>/<kbd>End</kbd> first/last · type a number + <kbd>Enter</kbd> to jump ·
+    <kbd>I</kbd> slide counter · <kbd>M</kbd> mute videos · <kbd>Q</kbd> back to this list.
+  </div>
+</div>
+
+<div id="stage"></div>
+<div id="blank"></div>
+<div id="hud"></div>
+<div id="jump"></div>
+<div id="start"><b>Press the clicker to start</b><span>Goes fullscreen on slide 1 · or click anywhere</span></div>
+<div id="overview"><div class="grid"></div></div>
+
+<script src="decks.js"></script>
+<script>
+(() => {
+  const DECKS = window.DECKS || [];
+  const $ = s => document.querySelector(s);
+  const picker = $('#picker'), stage = $('#stage'), blank = $('#blank'), hud = $('#hud'),
+        start = $('#start'), jump = $('#jump'), overview = $('#overview');
+
+  let deck = null, els = [], cur = 0, started = false, muted = false, jumpBuf = '', jumpT = 0, hudT = 0, hudPinned = false;
+
+  // ---------- picker ----------
+  const list = $('#deckList');
+  DECKS.forEach(d => {
+    const a = document.createElement('a');
+    a.href = '#' + d.id;
+    a.innerHTML = `<img src="${d.base}/${d.slides[0].img}" alt=""><div class="t"></div><div class="s"></div>`;
+    a.querySelector('.t').textContent = d.title;
+    a.querySelector('.s').textContent = `${d.speaker} · ${d.slides.length} slides` +
+      (d.slides.some(s => s.video) ? ` · ${d.slides.filter(s => s.video).length} with video` : '');
+    list.appendChild(a);
+  });
+
+  // ---------- routing: #deckId/slideNumber ----------
+  function route() {
+    const [id, n] = location.hash.slice(1).split('/');
+    const d = DECKS.find(x => x.id === id);
+    if (!d) { closeDeck(); return; }
+    if (!deck || deck.id !== d.id) openDeck(d);
+    const i = Math.max(0, Math.min(d.slides.length - 1, (parseInt(n, 10) || 1) - 1));
+    if (i !== cur || !els[i].classList.contains('on')) show(i, true);
+  }
+  window.addEventListener('hashchange', route);
+
+  function openDeck(d) {
+    deck = d; cur = -1; started = false;
+    stage.innerHTML = ''; els = [];
+    document.title = d.title + ' · ASMBLY';
+    d.slides.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'slide' + (d.fade ? ' fade' : '');
+      el.style.background = s.bg || d.bg || '#000';
+      el.dataset.i = i;
+      stage.appendChild(el);
+      els.push(el);
+    });
+    picker.style.display = 'none';
+    stage.classList.add('show');
+    start.classList.add('show');
+    buildOverview();
+  }
+
+  function closeDeck() {
+    exitFs();
+    deck = null; els = []; stage.innerHTML = '';
+    stage.classList.remove('show'); start.classList.remove('show');
+    overview.classList.remove('show'); setBlank(null);
+    picker.style.display = ''; hud.style.display = 'none';
+    document.title = 'ASMBLY Decks';
+  }
+
+  // lazily attach media for slides near the current one
+  function mount(i) {
+    const el = els[i]; if (!el || el.dataset.m) return;
+    const s = deck.slides[i];
+    el.dataset.m = 1;
+    if (s.img) {
+      const img = new Image();
+      img.decoding = 'async'; img.src = `${deck.base}/${s.img}`; img.alt = '';
+      el.appendChild(img);
+    }
+    if (s.video) {
+      const v = document.createElement('video');
+      v.src = `${deck.base}/${s.video}`;
+      v.preload = 'auto'; v.playsInline = true; v.loop = s.loop !== false;
+      v.muted = muted || !!s.mute;
+      if (s.img) v.poster = `${deck.base}/${s.img}`;
+      el.appendChild(v);
+    }
+  }
+  function unmount(i) {
+    const el = els[i]; if (!el || !el.dataset.m) return;
+    el.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); });
+    el.innerHTML = ''; delete el.dataset.m;
+  }
+
+  function show(i, fromRoute) {
+    if (!deck) return;
+    i = Math.max(0, Math.min(deck.slides.length - 1, i));
+    const prev = cur;
+    for (let k = 0; k < els.length; k++) {
+      if (Math.abs(k - i) <= 2) mount(k); else unmount(k);
+    }
+    if (prev >= 0 && els[prev] && prev !== i) {
+      els[prev].classList.remove('on');
+      els[prev].querySelectorAll('video').forEach(v => v.pause());
+    }
+    els[i].classList.add('on');
+    els[i].querySelectorAll('video').forEach(v => {
+      v.muted = muted || !!deck.slides[i].mute;
+      if (prev !== i) v.currentTime = 0;
+      const p = v.play();
+      if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+    });
+    cur = i;
+    const h = `#${deck.id}/${i + 1}`;
+    if (!fromRoute && location.hash !== h) history.replaceState(null, '', h);
+    flashHud();
+  }
+
+  const next = () => { if (!blank.style.display || blank.style.display === 'none') show(cur + 1); else setBlank(null); };
+  const prev = () => { if (!blank.style.display || blank.style.display === 'none') show(cur - 1); else setBlank(null); };
+
+  // ---------- fullscreen ----------
+  const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function enterFs() {
+    const r = document.documentElement;
+    (r.requestFullscreen || r.webkitRequestFullscreen || (() => {})).call(r)?.catch?.(() => {});
+  }
+  function exitFs() { if (isFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+  const toggleFs = () => isFs() ? exitFs() : enterFs();
+
+  function begin() {
+    if (started) return;
+    started = true;
+    start.classList.remove('show');
+    enterFs();
+    show(Math.max(cur, 0));
+  }
+
+  // ---------- blank / hud ----------
+  function setBlank(mode) {
+    if (!mode) { blank.style.display = 'none'; return; }
+    const on = blank.style.display === 'block' && blank.classList.contains('white') === (mode === 'white');
+    blank.classList.toggle('white', mode === 'white');
+    blank.style.display = on ? 'none' : 'block';
+  }
+  function flashHud() {
+    if (!deck) return;
+    hud.textContent = `${cur + 1} / ${deck.slides.length}`;
+    if (hudPinned) { hud.style.display = 'block'; return; }
+    hud.style.display = 'none';
+  }
+
+  // ---------- overview ----------
+  function buildOverview() {
+    const g = overview.querySelector('.grid'); g.innerHTML = '';
+    deck.slides.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.innerHTML = `<img loading="lazy" src="${deck.base}/${s.thumb || s.img}" alt=""><i>${i + 1}</i>${s.video ? '<i class="vid">▶</i>' : ''}`;
+      b.onclick = () => { overview.classList.remove('show'); show(i); };
+      g.appendChild(b);
+    });
+  }
+  function toggleOverview() {
+    const on = !overview.classList.contains('show');
+    overview.classList.toggle('show', on);
+    if (on) {
+      overview.querySelectorAll('button').forEach((b, i) => b.classList.toggle('cur', i === cur));
+      const c = overview.querySelectorAll('button')[cur];
+      c && c.focus(); c && c.scrollIntoView({ block: 'center' });
+    }
+  }
+
+  // ---------- input ----------
+  const NEXT = ['PageDown', 'ArrowRight', 'ArrowDown', ' ', 'Spacebar', 'Enter', 'n', 'N', 'MediaTrackNext'];
+  const PREV = ['PageUp', 'ArrowLeft', 'ArrowUp', 'Backspace', 'p', 'P', 'MediaTrackPrevious'];
+
+  document.addEventListener('keydown', e => {
+    if (!deck) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;          // leave browser shortcuts alone
+    const k = e.key;
+
+    if (overview.classList.contains('show')) {
+      if (k === 'g' || k === 'G' || k === 'Escape') { e.preventDefault(); toggleOverview(); }
+      return;   // buttons handle Enter/Space themselves
+    }
+
+    // Clicker "play" button: F5 / Shift+F5 / Escape. Never let F5 reload the page.
+    if (k === 'F5') { e.preventDefault(); if (!started) begin(); else toggleFs(); return; }
+    if (!started) {
+      if (NEXT.includes(k) || PREV.includes(k) || k === 'f' || k === 'F') { e.preventDefault(); begin(); }
+      return;
+    }
+
+    if (/^[0-9]$/.test(k)) {
+      jumpBuf += k; jump.textContent = jumpBuf; jump.style.display = 'block';
+      clearTimeout(jumpT); jumpT = setTimeout(() => { jumpBuf = ''; jump.style.display = 'none'; }, 2500);
+      e.preventDefault(); return;
+    }
+    if (k === 'Enter' && jumpBuf) {
+      e.preventDefault(); const n = parseInt(jumpBuf, 10);
+      jumpBuf = ''; jump.style.display = 'none'; show(n - 1); return;
+    }
+
+    if (NEXT.includes(k)) { e.preventDefault(); next(); }
+    else if (PREV.includes(k)) { e.preventDefault(); prev(); }
+    else if (k === 'Home') { e.preventDefault(); show(0); }
+    else if (k === 'End') { e.preventDefault(); show(deck.slides.length - 1); }
+    else if (k === 'b' || k === 'B' || k === '.') { e.preventDefault(); setBlank('black'); }
+    else if (k === 'w' || k === 'W' || k === ',') { e.preventDefault(); setBlank('white'); }
+    else if (k === 'f' || k === 'F') { e.preventDefault(); toggleFs(); }
+    else if (k === 'g' || k === 'G') { e.preventDefault(); toggleOverview(); }
+    else if (k === 'i' || k === 'I') { hudPinned = !hudPinned; flashHud(); }
+    else if (k === 'm' || k === 'M') {
+      muted = !muted;
+      els[cur]?.querySelectorAll('video').forEach(v => v.muted = muted || !!deck.slides[cur].mute);
+      hud.textContent = muted ? 'videos muted' : 'video sound on'; hud.style.display = 'block';
+      clearTimeout(hudT); hudT = setTimeout(flashHud, 1200);
+    }
+    else if (k === 'q' || k === 'Q') { location.hash = ''; }
+  });
+
+  start.addEventListener('click', begin);
+  stage.addEventListener('click', e => {
+    if (!started) return begin();
+    (e.clientX > innerWidth / 3) ? next() : prev();
+  });
+  stage.addEventListener('dblclick', e => e.preventDefault());
+  blank.addEventListener('click', () => setBlank(null));
+
+  // show cursor briefly on mouse move, hide when idle
+  let curT = 0;
+  document.addEventListener('mousemove', () => {
+    stage.classList.add('cursor'); clearTimeout(curT);
+    curT = setTimeout(() => stage.classList.remove('cursor'), 1500);
+  });
+
+  // keep the display awake while presenting
+  let lock = null;
+  async function wake() { try { if (deck && 'wakeLock' in navigator) lock = await navigator.wakeLock.request('screen'); } catch (_) {} }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
+  document.addEventListener('keydown', () => { if (!lock) wake(); }, { once: true });
+
+  route();
+})();
+</script>
+</body>
+</html>
